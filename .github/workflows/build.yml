@@ -17,8 +17,10 @@ jobs:
       - name: Unzip Android project
         run: |
           set -e
+
           ZIP=$(find . -maxdepth 1 -type f -name '*.zip' | head -n 1)
           echo "ZIP=$ZIP"
+
           unzip -q "$ZIP" -d unpacked
 
           ROOT=$(find unpacked -name settings.gradle.kts -type f -print -quit | xargs dirname)
@@ -35,6 +37,64 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Fix Java and Kotlin JVM targets
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/build.gradle.kts")
+          text = path.read_text()
+
+          # Javaを17に統一
+          if "compileOptions" not in text:
+              text = text.replace(
+                  "android {",
+                  """android {
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+          """,
+                  1
+              )
+
+          # Kotlinを17に統一
+          if "jvmTarget = \"17\"" not in text and "jvmTarget = '17'" not in text:
+              text = text.replace(
+                  "android {",
+                  """android {
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          """,
+                  1
+              )
+
+          path.write_text(text)
+          PY
+
+          echo "===== app/build.gradle.kts ====="
+          cat app/build.gradle.kts
+          echo "================================"
+
+      - name: Build debug APK
+        run: gradle assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: GalaxyPhotoShuffle-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
