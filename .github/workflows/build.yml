@@ -1,6 +1,6 @@
 name: Build Galaxy Photo Shuffle APK
 
-"on":
+on:
   workflow_dispatch:
   push:
     branches:
@@ -14,22 +14,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up JDK 17
+      - name: Unzip Android project
+        run: |
+          set -e
+          ZIP=$(find . -maxdepth 1 -type f -name '*.zip' | head -n 1)
+          echo "ZIP=$ZIP"
+          unzip -q "$ZIP" -d unpacked
+
+          ROOT=$(find unpacked -name settings.gradle.kts -type f -print -quit | xargs dirname)
+          echo "PROJECT ROOT=$ROOT"
+
+          cp -r "$ROOT/app" ./app
+          cp "$ROOT/settings.gradle.kts" .
+          cp "$ROOT/build.gradle.kts" .
+          cp "$ROOT/gradle.properties" .
+
+      - name: Set up Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Install Android SDK packages
+      - name: Install Android SDK
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Install Gradle
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.10"
 
       - name: Build debug APK
         run: gradle assembleDebug --stacktrace
@@ -37,7 +50,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: GalaxyPhotoShuffle-S26Plus-APK
+          name: GalaxyPhotoShuffle-debug
           path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 7
