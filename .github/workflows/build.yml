@@ -19,11 +19,23 @@ jobs:
           set -e
 
           ZIP=$(find . -maxdepth 1 -type f -name '*.zip' | head -n 1)
+
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: ZIP file not found."
+            exit 1
+          fi
+
           echo "ZIP=$ZIP"
 
           unzip -q "$ZIP" -d unpacked
 
           ROOT=$(find unpacked -name settings.gradle.kts -type f -print -quit | xargs dirname)
+
+          if [ -z "$ROOT" ] || [ ! -d "$ROOT/app" ]; then
+            echo "ERROR: Android project root or app directory not found."
+            exit 1
+          fi
+
           echo "PROJECT ROOT=$ROOT"
 
           cp -r "$ROOT/app" ./app
@@ -49,10 +61,17 @@ jobs:
 
       - name: Fix Java and Kotlin JVM targets
         run: |
+          set -e
+
           python3 - <<'PY'
           from pathlib import Path
 
           path = Path("app/build.gradle.kts")
+
+          if not path.exists():
+              print("ERROR: app/build.gradle.kts not found.")
+              raise SystemExit(1)
+
           text = path.read_text()
 
           # Javaを17に統一
@@ -67,20 +86,49 @@ jobs:
           """,
                   1
               )
+          else:
+              text = text.replace(
+                  "sourceCompatibility = JavaVersion.VERSION_1_8",
+                  "sourceCompatibility = JavaVersion.VERSION_17"
+              )
+              text = text.replace(
+                  "targetCompatibility = JavaVersion.VERSION_1_8",
+                  "targetCompatibility = JavaVersion.VERSION_17"
+              )
+              text = text.replace(
+                  "sourceCompatibility = JavaVersion.VERSION_8",
+                  "sourceCompatibility = JavaVersion.VERSION_17"
+              )
+              text = text.replace(
+                  "targetCompatibility = JavaVersion.VERSION_8",
+                  "targetCompatibility = JavaVersion.VERSION_17"
+              )
 
           # Kotlinを17に統一
           if "jvmTarget = \"17\"" not in text and "jvmTarget = '17'" not in text:
-              text = text.replace(
-                  "android {",
-                  """android {
+              if "kotlinOptions" not in text:
+                  text = text.replace(
+                      "android {",
+                      """android {
               kotlinOptions {
                   jvmTarget = "17"
               }
           """,
-                  1
-              )
+                      1
+                  )
+              else:
+                  text = text.replace(
+                      "jvmTarget = \"1.8\"",
+                      "jvmTarget = \"17\""
+                  )
+                  text = text.replace(
+                      "jvmTarget = '1.8'",
+                      "jvmTarget = '17'"
+                  )
 
           path.write_text(text)
+
+          print("Java/Kotlin JVM targets have been set to 17.")
           PY
 
           echo "===== app/build.gradle.kts ====="
@@ -88,9 +136,30 @@ jobs:
           echo "================================"
 
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleDebug --stacktrace --info 2>&1 | tee build.log
+
+      - name: Show build error
+        if: failure()
+        run: |
+          echo ""
+          echo "========================================"
+          echo "           BUILD ERROR"
+          echo "========================================"
+
+          if [ -f build.log ]; then
+            grep -B 15 -A 40 -E \
+              "FAILED|What went wrong|Caused by:|error:" \
+              build.log || true
+          else
+            echo "build.log was not found."
+          fi
+
+          echo "========================================"
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: GalaxyPhotoShuffle-debug
